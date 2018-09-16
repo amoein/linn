@@ -8,7 +8,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0]).
+-export([start_link/0 ,get_pid/0]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -37,3 +37,5 @@ init([]) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+get_pid()->
+    linn:get_process(linn_test).
