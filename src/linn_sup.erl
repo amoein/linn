@@ -22,9 +22,9 @@
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
-add_pool(Id, M ,F, Count) ->
+add_pool(Id, M, F, Count) ->
     supervisor:start_child(?MODULE, #{id => Id,
-                                      start =>  {linn_pool, start_link, [Id, M ,F, Count]}}).
+                                      start =>  {linn_pool, start_link, [Id, M, F, Count]}}).
 %%====================================================================
 %% Supervisor callbacks
 %%====================================================================
@@ -34,6 +34,8 @@ add_pool(Id, M ,F, Count) ->
 %% Before OTP 18 tuples must be used to specify a child. e.g.
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 init([]) ->
+    linn_pool_sup = ets:new(linn_pool_sup, [public, named_table,
+                                            {read_concurrency, true}]),
     {ok, {{one_for_all, 0, 1}, []}}.
 
 %%====================================================================

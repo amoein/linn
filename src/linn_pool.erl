@@ -16,73 +16,64 @@
          terminate/2,
          code_change/3]).
 
--define(SERVER, ?MODULE).
+-define(ETS_NAME, linn_pool_sup).
 
--record(state, {ets :: string(),
-                m :: atom(), f :: atom()}).
+-record(state, {module :: atom(),
+                func :: atom(),
+                id :: atom()}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 start_link(Id, M, F, Count) ->
-    io:format("~n ~p T ~n", [{M, F, Count}]),
     gen_server:start_link({local, Id}, ?MODULE, [Id, M, F, Count], []).
 
+-spec add(atom()) -> ok.
 add(Id) ->
     gen_server:cast(Id, new).
 
+
+-spec get(atom()) -> {ok, pid()} | error.
 get(Id) ->
-    Name0 = erlang:atom_to_list(?MODULE) ++ "_" ++ erlang:atom_to_list(Id),
+    case ets:lookup(?ETS_NAME, Id) of
+        [{_, Pids}] ->
+            Time = erlang:system_time(),
+            case lists:sublist(Pids, ((Time rem length(Pids)) + 1), 1) of
+                [] -> error;
+                [Pid] -> {ok, Pid}
+            end;
+        _ -> error
+    end.
 
-    Name = erlang:list_to_atom(Name0),
-
-    [{_, Count}] = ets:lookup(Name, count),
-    Time = erlang:system_time(),
-
-    [{_, Pid}] = ets:lookup(Name, ((Time rem Count) + 1)),
-
-    Pid.
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
 init([Id, M, F, Count]) ->
-    Name0 = erlang:atom_to_list(?MODULE) ++ "_" ++ erlang:atom_to_list(Id),
-    Name = erlang:list_to_atom(Name0),
+    Process = [erlang:apply(M, F, []) || _ <- lists:seq(1, Count)],
+    Pids = [Pid || {ok, Pid} <- Process],
 
-    Process = [{Item, erlang:apply(M, F, [])} || Item <- lists:seq(1, Count)],
-    [erlang:monitor(process, Pid) || {_, {ok, Pid}} <- Process],
+    [erlang:monitor(process, Pid) || {ok, Pid} <- Process],
 
-    ets:new(Name, [named_table,{read_concurrency, true}]),
+    ets:insert_new(?ETS_NAME, {Id, Pids}),
 
-    [begin
-         ets:insert_new(Name, {Item, Pid}),
-         ets:insert_new(Name, {Pid, Item})
-
-     end || {Item, {ok, Pid}} <- Process],
-
-    ets:insert_new(Name, {count, Count}),
-
-    {ok, #state{ets = Name, m = M, f = F}}.
+    {ok, #state{id = Id, module = M, func = F}}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
-handle_cast(new, #state{ets = ETS,
-                        m = M,
-                        f = F} = State) ->
+handle_cast(new, #state{id = Id,
+                        module = M,
+                        func = F} = State) ->
 
-    [{_, Count}] = ets:lookup(ETS, count),
+    [{_, Pids}] = ets:lookup(?ETS_NAME, Id),
 
-    Head = Count + 1,
     {ok, NewPid} = erlang:apply(M, F, []),
     erlang:monitor(process, NewPid),
 
-    ets:delete(ETS, count),
-    ets:delete(ETS, {count, Head}),
-    ets:insert_new(ETS, {Head, NewPid}),
-    ets:insert_new(ETS, {NewPid, Head}),
+    ets:delete(?ETS_NAME, Id),
+    ets:insert_new(?ETS_NAME, [NewPid | Pids]),
 
     {noreply, State};
 
@@ -90,20 +81,15 @@ handle_cast(_Request, State) ->
     {noreply, State}.
 
 
-handle_info({'DOWN', _Ref, process, Pid, _Reason}, #state{ets = ETS,
-                                                          m = M,
-                                                          f = F} = State) ->
-    [{Pid, Head}] = ets:lookup(ETS, Pid),
-    ets:delete(ETS, Head),
-    ets:delete(ETS, Pid),
+handle_info({'DOWN', _Ref, process, Pid, _Reason}, #state{id = Id} = State) ->
+    [{_, Pids}] = ets:lookup(?ETS_NAME, Id),
 
-    {ok, NewPid} = erlang:apply(M, F, []),
+    NewPids = lists:delete(Pid, Pids),
 
-    ets:insert_new(ETS, {Head, NewPid}),
-    ets:insert_new(ETS, {NewPid, Head}),
+    ets:delete(?ETS_NAME, Id),
+    ets:insert_new(?ETS_NAME, NewPids),
 
-    erlang:monitor(process, NewPid),
-
+    gen_server:cast(self(), new),
     {noreply, State};
 
 handle_info(_Info, State) ->
