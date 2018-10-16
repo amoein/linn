@@ -16,7 +16,7 @@
          terminate/2,
          code_change/3]).
 
--define(ETS_NAME, linn_pool_sup).
+-define(ETS_NAME(P), list_to_atom(atom_to_list(linn_pool_sup_) ++ atom_to_list(P))).
 
 -record(state, {module :: atom(),
                 func :: atom(),
@@ -35,61 +35,101 @@ add(Id) ->
 
 -spec get(atom()) -> {ok, pid()} | error.
 get(Id) ->
-    case ets:lookup(?ETS_NAME, Id) of
-        [{_, Pids}] ->
-            Time = erlang:system_time(),
-            case lists:sublist(Pids, ((Time rem length(Pids)) + 1), 1) of
-                [] -> error;
-                [Pid] -> {ok, Pid}
-            end;
-        _ -> error
+    ID = ?ETS_NAME(Id),
+    case ets:info(ID) of
+        undefined -> error;
+
+        E ->
+            case lists:keyfind(size, 1, E) of
+                {size, 0} -> error;
+
+                {size, N} ->
+                    Indexes = round(N / 2),
+                    Index = random:uniform(Indexes),
+
+                    case ets:lookup(ID, Index) of
+                        [{Index, Pid}] -> Pid;
+
+                        _ -> error
+
+                    end
+
+            end
     end.
-
-
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
 init([Id, M, F, Count]) ->
-    Process = [erlang:apply(M, F, []) || _ <- lists:seq(1, Count)],
-    Pids = [Pid || {ok, Pid} <- Process],
+    ID = ?ETS_NAME(Id),
 
-    [erlang:monitor(process, Pid) || {ok, Pid} <- Process],
+    ID = ets:new(ID, [public, named_table, {read_concurrency, true}]),
 
-    ets:insert_new(?ETS_NAME, {Id, Pids}),
+    [begin
+         {ok, Pid} = erlang:apply(M, F, []),
+
+         erlang:monitor(process, Pid),
+
+         ets:insert_new(ID, {Index, Pid}),
+
+         ets:insert_new(ID, {Pid, Index})
+
+     end || Index <- lists:seq(1, Count)],
+
 
     {ok, #state{id = Id, module = M, func = F}}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
-handle_cast(new, #state{id = Id,
-                        module = M,
-                        func = F} = State) ->
+handle_cast(new, #state{id = Id, module = M, func = F} = State) ->
+    ID = ?ETS_NAME(Id),
 
-    [{_, Pids}] = ets:lookup(?ETS_NAME, Id),
+    case ets:info(ID) of
+        undefined -> {noreply, State};
+
+        E ->
+            {size, N} = lists:keyfind(size, 1, E),
+
+            Indexes = round(N / 2),
+            Index = Indexes + 1,
+
+            {ok, NewPid} = erlang:apply(M, F, []),
+
+            erlang:monitor(process, NewPid),
+
+            ets:insert_new(ID, {Index, NewPid}),
+
+            ets:insert_new(ID, {NewPid, Index}),
+
+            {noreply, State}
+    end;
+
+handle_cast({new, Index}, #state{id = Id, module = M, func = F} = State) ->
+    ID = ?ETS_NAME(Id),
 
     {ok, NewPid} = erlang:apply(M, F, []),
+
     erlang:monitor(process, NewPid),
 
-    ets:delete(?ETS_NAME, Id),
-    ets:insert_new(?ETS_NAME, [NewPid | Pids]),
+    ets:insert_new(ID, {Index, NewPid}),
+    ets:insert_new(ID, {NewPid, Index}),
 
     {noreply, State};
 
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, #state{id = Id} = State) ->
-    [{_, Pids}] = ets:lookup(?ETS_NAME, Id),
+    ID = ?ETS_NAME(Id),
 
-    NewPids = lists:delete(Pid, Pids),
+    [{_, Index}] = ets:lookup(ID, Pid),
 
-    ets:delete(?ETS_NAME, Id),
-    ets:insert_new(?ETS_NAME, NewPids),
+    ets:delete(ID, Pid),
+    ets:delete(ID, Index),
 
-    gen_server:cast(self(), new),
+    gen_server:cast(self(), {new, Index}),
+
     {noreply, State};
 
 handle_info(_Info, State) ->

@@ -34,8 +34,6 @@ add_pool(Id, M, F, Count) ->
 %% Before OTP 18 tuples must be used to specify a child. e.g.
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 init([]) ->
-    linn_pool_sup = ets:new(linn_pool_sup, [public, named_table,
-                                            {read_concurrency, true}]),
     {ok, {{one_for_all, 0, 1}, []}}.
 
 %%====================================================================
