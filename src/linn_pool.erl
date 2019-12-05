@@ -45,7 +45,7 @@ get(Id) ->
 
                 {size, N} ->
                     Indexes = round(N / 2),
-                    Index = random:uniform(Indexes),
+                    Index = rand:uniform_s(Indexes,rand:seed(exrop)),
 
                     case ets:lookup(ID, Index) of
                         [{Index, Pid}] -> Pid;
