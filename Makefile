@@ -1,15 +1,19 @@
-.PHONY: all test clean
-REBAR=./resource/rebar3
+.PHONY: clean ct format format-check dialyzer test
 
-all: compile
+format:	 
+	 rebar3 fmt
 
-compile:
-	${REBAR} compile
+format-check:	 	 
+	 rebar3 fmt --check
 
-test:
-	${REBAR} ct -v
+ct:
+	rebar3 ct -v 100 --cover
 
 clean:
-	${REBAR} clean ;rm -rf _build/default/rel/*
+	rebar3 clean
 
+dialyzer:
+	rebar3 dialyzer
 
+test:
+	ct_run -logdir logs	
