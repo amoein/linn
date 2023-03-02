@@ -4,10 +4,10 @@
 
 -behaviour(gen_server).
 
+-include("linn.hrl").
+
 %% API
--export([start_link/4]).
--export([add/1]).
--export([get/1]).
+-export([start_link/1, add/1, get/1]).
 
 %% gen_server callbacks
 -export([
@@ -24,14 +24,15 @@
 -record(state, {
     module :: atom(),
     func :: atom(),
-    id :: atom()
+    id :: atom(),
+    arity :: tuple()
 }).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-start_link(Id, M, F, Count) ->
-    gen_server:start_link({local, Id}, ?MODULE, [Id, M, F, Count], []).
+start_link(#option{pool_id = Id} = Opts) ->
+    gen_server:start_link({local, Id}, ?MODULE, [Opts], []).
 
 -spec add(atom()) -> ok.
 add(Id) ->
@@ -61,14 +62,16 @@ get(Id) ->
 %%% gen_server callbacks
 %%%===================================================================
 
-init([Id, M, F, Count]) ->
+-spec init([option()]) -> {ok, #state{}}.
+init([Opts]) when is_record(Opts, option) ->
+    {_, Id, M, F, A, Count} = Opts,
     ID = ?ETS_NAME(Id),
 
     ID = ets:new(ID, [public, named_table, {read_concurrency, true}]),
 
     [
         begin
-            {ok, Pid} = erlang:apply(M, F, []),
+            {ok, Pid} = erlang:apply(M, F, [A]),
 
             erlang:monitor(process, Pid),
 
@@ -79,7 +82,7 @@ init([Id, M, F, Count]) ->
      || Index <- lists:seq(1, Count)
     ],
 
-    {ok, #state{id = Id, module = M, func = F}}.
+    {ok, #state{id = Id, module = M, func = F, arity = A}}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -139,4 +142,3 @@ terminate(_Reason, _State) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
