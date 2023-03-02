@@ -1,5 +1,7 @@
 -module(linn_sup).
 
+-author("amoein").
+
 -behaviour(supervisor).
 
 -include("linn.hrl").
