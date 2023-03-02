@@ -23,8 +23,10 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 add_pool(Id, M, F, Count) ->
-    supervisor:start_child(?MODULE, #{id => Id,
-                                      start =>  {linn_pool, start_link, [Id, M, F, Count]}}).
+    supervisor:start_child(?MODULE, #{
+        id => Id,
+        start => {linn_pool, start_link, [Id, M, F, Count]}
+    }).
 %%====================================================================
 %% Supervisor callbacks
 %%====================================================================
