@@ -5,7 +5,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([start_link/1]).
 
 %% gen_server callbacks
 -export([
@@ -22,29 +22,36 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-start_link() ->
+-spec start_link([]) -> {ok, pid()}.
+start_link([]) ->
     gen_server:start_link(?MODULE, [], []).
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
-
+-spec init([]) -> {ok, #state{}}.
 init([]) ->
     timer:send_after(10, kill),
     {ok, #state{}}.
 
+-spec handle_call(any(), any(), #state{}) -> {reply, any(), #state{}}.
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
+-spec handle_cast(any(), #state{}) -> {noreply, #state{}}.
 handle_cast(_Request, State) ->
     {noreply, State}.
 
+-spec handle_info(any(), #state{}) -> {noreply, #state{}}.
 handle_info(kill, State) ->
-    {stop, normal, State};
+    {stop, error, State};
 handle_info(_Info, State) ->
     {noreply, State}.
+
+-spec terminate(any(), #state{}) -> ok.
 terminate(_Reason, _State) ->
     ok.
 
+-spec code_change(any(), #state{}, any()) -> {ok, #state{}}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.

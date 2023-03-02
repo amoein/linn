@@ -1,5 +1,7 @@
 -module(linn_app).
 
+-author("amoein").
+
 -behaviour(application).
 
 %% Application callbacks

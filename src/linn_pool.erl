@@ -21,19 +21,11 @@
 
 -define(ETS_NAME(P), list_to_atom(atom_to_list(linn_pool_sup_) ++ atom_to_list(P))).
 
--record(state, {
-    module :: atom(),
-    func :: atom(),
-    id :: atom(),
-    arity :: tuple()
-}).
+-record(state, {option :: option(), id :: atom()}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-start_link(#option{pool_id = Id} = Opts) ->
-    gen_server:start_link({local, Id}, ?MODULE, [Opts], []).
-
 -spec add(atom()) -> ok.
 add(Id) ->
     gen_server:cast(Id, new).
@@ -41,95 +33,82 @@ add(Id) ->
 -spec get(atom()) -> {ok, pid()} | error.
 get(Id) ->
     ID = ?ETS_NAME(Id),
-    case ets:info(ID) of
-        undefined ->
+    Info = ets:info(ID),
+    if
+        Info == undefined ->
             error;
-        E ->
-            case lists:keyfind(size, 1, E) of
+        true ->
+            case lists:keyfind(size, 1, Info) of
                 {size, 0} ->
                     error;
                 {size, N} ->
-                    Indexes = round(N / 2),
-                    Index = rand:uniform_s(Indexes, rand:seed(exrop)),
-
-                    case ets:lookup(ID, Index) of
-                        [{Index, Pid}] -> Pid;
+                    {Index, _} = rand:uniform_s(N, rand:seed(exrop)),
+                    % ?LOG_ERROR("REsult ~p", [ets:match(ID, {'$1',Index,'$2'})])
+                    case ets:match(ID, {'$1',Index,'$2'}) of
+                        [{Pid, _}] -> {ok, Pid};
                         _ -> error
                     end
             end
     end.
+
+-spec start_link(option()) -> {ok, pid()}.
+start_link(#option{pool_id = Id} = Opts) ->
+    ?LOG_DEBUG("Chiled Resive", []),
+    gen_server:start_link({local, Id}, ?MODULE, [Opts], []).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
 -spec init([option()]) -> {ok, #state{}}.
 init([Opts]) when is_record(Opts, option) ->
-    {_, Id, M, F, A, Count} = Opts,
-    ID = ?ETS_NAME(Id),
+    Id = ?ETS_NAME(Opts#option.pool_id),
 
-    ID = ets:new(ID, [public, named_table, {read_concurrency, true}]),
+    Id = ets:new(Id, [ordered_set, public, named_table, {read_concurrency, true}]),
 
-    [
-        begin
-            {ok, Pid} = erlang:apply(M, F, [A]),
+    [gen_server:cast(self(), {new, 0}) || _ <- lists:seq(1, Opts#option.process_count)],
 
-            erlang:monitor(process, Pid),
+    {ok, #state{option = Opts, id = Id}}.
 
-            ets:insert_new(ID, {Index, Pid}),
-
-            ets:insert_new(ID, {Pid, Index})
-        end
-     || Index <- lists:seq(1, Count)
-    ],
-
-    {ok, #state{id = Id, module = M, func = F, arity = A}}.
-
+-spec handle_call(any(), any(), #state{}) -> {reply, any(), #state{}}.
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
-handle_cast(new, #state{id = Id, module = M, func = F} = State) ->
-    ID = ?ETS_NAME(Id),
-
-    case ets:info(ID) of
-        undefined ->
+-spec handle_cast(any(), #state{}) -> {noreply, #state{}}.
+handle_cast({new, Index}, #state{id = Id, option = Opts} = State) ->
+    Info = ets:info(Id),
+    if
+        Info == undefined ->
             {noreply, State};
-        E ->
-            {size, N} = lists:keyfind(size, 1, E),
+        true ->
+            InsertIndex =
+                if
+                    Index == 0 ->
+                        {size, ItemsCount} = lists:keyfind(size, 1, Info),
+                        ItemsCount + 1;
+                    true ->
+                        Index
+                end,
 
-            Indexes = round(N / 2),
-            Index = Indexes + 1,
+            {ok, NewPid} = erlang:apply(
+                Opts#option.handler_module,
+                Opts#option.handler_func,
+                [Opts#option.handler_func_arity]
+            ),
 
-            {ok, NewPid} = erlang:apply(M, F, []),
+            Ref = erlang:monitor(process, NewPid),
 
-            erlang:monitor(process, NewPid),
-
-            ets:insert_new(ID, {Index, NewPid}),
-
-            ets:insert_new(ID, {NewPid, Index}),
+            ets:insert_new(Id, {NewPid, InsertIndex, Ref}),
 
             {noreply, State}
     end;
-handle_cast({new, Index}, #state{id = Id, module = M, func = F} = State) ->
-    ID = ?ETS_NAME(Id),
-
-    {ok, NewPid} = erlang:apply(M, F, []),
-
-    erlang:monitor(process, NewPid),
-
-    ets:insert_new(ID, {Index, NewPid}),
-    ets:insert_new(ID, {NewPid, Index}),
-
-    {noreply, State};
 handle_cast(_Request, State) ->
     {noreply, State}.
 
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, #state{id = Id} = State) ->
-    ID = ?ETS_NAME(Id),
-
-    [{_, Index}] = ets:lookup(ID, Pid),
-
-    ets:delete(ID, Pid),
-    ets:delete(ID, Index),
+    [{Pid, Index, _Ref_1}] = ets:take(Id, Pid),
+    ?LOG_INFO("Server down: ~p", [{process_down, Pid, _Reason}]),
+    ets:delete(Id, Pid),
 
     gen_server:cast(self(), {new, Index}),
 
