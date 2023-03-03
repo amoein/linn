@@ -121,7 +121,7 @@ For get process form pool you should use `linn:get_process`:
 
 ## Version History
 
-- 0.2.0 (2 March 2023)
+- 0.2.0 (3 March 2023)
   - update ci config
   - Remove extra code
   - Improve performance on ets store
