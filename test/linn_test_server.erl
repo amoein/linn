@@ -31,7 +31,6 @@ start_link([]) ->
 %%%===================================================================
 -spec init([]) -> {ok, #state{}}.
 init([]) ->
-    timer:send_after(10, kill),
     {ok, #state{}}.
 
 -spec handle_call(any(), any(), #state{}) -> {reply, any(), #state{}}.
@@ -44,7 +43,7 @@ handle_cast(_Request, State) ->
 
 -spec handle_info(any(), #state{}) -> {noreply, #state{}}.
 handle_info(kill, State) ->
-    {stop, error, State};
+    {stop, normal, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 

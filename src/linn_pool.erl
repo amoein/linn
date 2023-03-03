@@ -33,27 +33,20 @@ add(Id) ->
 -spec get(atom()) -> {ok, pid()} | error.
 get(Id) ->
     ID = ?ETS_NAME(Id),
-    Info = ets:info(ID),
-    if
-        Info == undefined ->
+    case ets:info(ID, size) of
+        undefined ->
             error;
-        true ->
-            case lists:keyfind(size, 1, Info) of
-                {size, 0} ->
-                    error;
-                {size, N} ->
-                    {Index, _} = rand:uniform_s(N, rand:seed(exrop)),
-                    % ?LOG_ERROR("REsult ~p", [ets:match(ID, {'$1',Index,'$2'})])
-                    case ets:match(ID, {'$1',Index,'$2'}) of
-                        [{Pid, _}] -> {ok, Pid};
-                        _ -> error
-                    end
+        Size ->
+            {Index, _} = rand:uniform_s(Size, rand:seed(exrop)),
+
+            case ets:match(ID, {'$1', Index, '_'}) of
+                [[Pid]] -> {ok, Pid};
+                _ -> error
             end
     end.
 
 -spec start_link(option()) -> {ok, pid()}.
 start_link(#option{pool_id = Id} = Opts) ->
-    ?LOG_DEBUG("Chiled Resive", []),
     gen_server:start_link({local, Id}, ?MODULE, [Opts], []).
 
 %%%===================================================================
@@ -76,18 +69,15 @@ handle_call(_Request, _From, State) ->
 
 -spec handle_cast(any(), #state{}) -> {noreply, #state{}}.
 handle_cast({new, Index}, #state{id = Id, option = Opts} = State) ->
-    Info = ets:info(Id),
-    if
-        Info == undefined ->
+    Size = ets:info(Id, size),
+    case ets:info(Id, size) of
+        undefined ->
             {noreply, State};
-        true ->
+        Size ->
             InsertIndex =
                 if
-                    Index == 0 ->
-                        {size, ItemsCount} = lists:keyfind(size, 1, Info),
-                        ItemsCount + 1;
-                    true ->
-                        Index
+                    Index == 0 -> Size + 1;
+                    true -> Index
                 end,
 
             {ok, NewPid} = erlang:apply(
@@ -96,8 +86,11 @@ handle_cast({new, Index}, #state{id = Id, option = Opts} = State) ->
                 [Opts#option.handler_func_arity]
             ),
 
-            Ref = erlang:monitor(process, NewPid),
+            % for preventing from cascade process down
+            unlink(NewPid),
 
+            % but still wanna know if it faces any problem
+            Ref = erlang:monitor(process, NewPid),
             ets:insert_new(Id, {NewPid, InsertIndex, Ref}),
 
             {noreply, State}
@@ -107,7 +100,7 @@ handle_cast(_Request, State) ->
 
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, #state{id = Id} = State) ->
     [{Pid, Index, _Ref_1}] = ets:take(Id, Pid),
-    ?LOG_INFO("Server down: ~p", [{process_down, Pid, _Reason}]),
+    ?LOG_ERROR("Linn worker: ~p", [{process_down, Pid, _Reason}]),
     ets:delete(Id, Pid),
 
     gen_server:cast(self(), {new, Index}),
@@ -117,6 +110,7 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, _State) ->
+    ?LOG_ERROR("Terminate ~p", [{_Reason, _State}]),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->

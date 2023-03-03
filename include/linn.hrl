@@ -18,8 +18,8 @@
 
 -else.
 
--define(LOG_ERROR(Format, Args), lager:error(Format, Args)).
--define(LOG_INFO(Format, Args), lager:info(Format, Args)).
--define(LOG_DEBUG(Format, Args), lager:debug(Format, Args)).
+-define(LOG_ERROR(Format, Args), logger:log(error, Format, Args)).
+-define(LOG_INFO(Format, Args), logger:log(info, Format, Args)).
+-define(LOG_DEBUG(Format, Args), logger:log(debug, Format, Args)).
 
 -endif.

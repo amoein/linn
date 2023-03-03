@@ -7,7 +7,7 @@
 %% API
 -export([add_pool/1, get_process/1]).
 
--spec add_pool(Option :: option()) -> ok.
+-spec add_pool(Option :: option()) -> {ok, pid()} | {error, term()}.
 add_pool(Option) ->
     linn_sup:add_pool(Option).
 
