@@ -12,6 +12,9 @@
 %% Test cases
 -export([pool/1, multi/1, fail_recover/1]).
 
+all() ->
+    [pool, multi, fail_recover].
+
 suite() -> [].
 
 init_per_suite(Config) ->
@@ -41,8 +44,6 @@ init_per_suite(Config) ->
 
 end_per_suite(_Config) -> ok.
 
-all() -> [fail_recover,pool].
-
 pool(_Config) ->
     {ok, Res} = linn:get_process(test1),
     erlang:is_pid(Res).
@@ -50,23 +51,34 @@ pool(_Config) ->
 multi(_Config) ->
     T1 = erlang:system_time(millisecond),
 
-    L = [
-        begin
-            Res = linn:get_process(test2),
-            erlang:is_pid(Res)
-        end
-     || _ <- lists:seq(1, 1_000_000)
-    ],
+    Result = lists:foldr(
+        fun(_, Acc) ->
+            case linn:get_process(test2) of
+                {ok, Res} -> erlang:is_pid(Res) and Acc;
+                _ -> false
+            end
+        end,
+        true,
+        lists:seq(1, 100_000)
+    ),
 
     T2 = erlang:system_time(millisecond),
-    ?LOG_INFO("Result ~p", [(T2 - T1)]),
-
-    not lists:member(false, L).
+    ?LOG_INFO("Result time out for 100K request: ~p ms", [(T2 - T1)]),
+    ?assert(Result).
 
 fail_recover(_Config) ->
-    {ok, Res} = linn:get_process(test3),
-    ?LOG_INFO("Res: ~p", [Res]),
-    Res ! kill,
-    timer:sleep(5_000),
-    Res1 = linn:get_process(test3),
-    ?assertNotEqual(Res, Res1).
+    {ok, Res1} = linn:get_process(test3),
+    ?LOG_INFO("Res: ~p", [Res1]),
+    % terminate normally
+    Res1 ! kill,
+    timer:sleep(1),
+    {ok, Res2} = linn:get_process(test3),
+    ?LOG_INFO("Res1: ~p Res2: ~p", [Res1, Res2]),
+    ?assertNotEqual(Res1, Res2),
+    % terminate abnormally
+    exit(Res2, "check"),
+    timer:sleep(1),
+    {ok, Res3} = linn:get_process(test3),
+
+    ?LOG_INFO("Res2: ~p Res3: ~p", [Res2, Res3]),
+    ?assertNotEqual(Res2, Res3).
